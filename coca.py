@@ -6,12 +6,18 @@ from torch.nn.functional import cross_entropy as ce
 class CoCa(nn.Module):
 	def __init__(self, 
 			  image_enc, 
-			  image_dim=1024):
+			  image_dim=1024,
+			  text_dim=1024):
 		super(CoCa, self).__init__()
 
 		self.image_enc = None
 		self.uni_text_dec = nn.ModuleList([])
 		self.mml_text_dec = nn.ModuleList([])
+
+		self.image_dim = image_dim
+		self.text_dim = text_dim
+
+		self.cls_token = nn.Parameter(torch.randn(self.text_dim))
 
 		self.temperature = None
 
@@ -23,13 +29,11 @@ class CoCa(nn.Module):
 
 
 	def compute_text_embeddings(self, text_tokens):
-		pass
+		# convert text into embeddings
+
+		# add cls token to the text
 
 	def contrastive_loss(self, img_emb, txt_emb):
-		# sim = torch.einsum('id,jd->i,j', img_emb, txt_emb) # mentioned the dimensions config to compute the dot product between each pair of vectors from two sets of vectors
-		# sim = sim/self.temperature
-
-
 		batch = img_emb.shape[0]
 		device = img_emb.device
 
@@ -47,13 +51,9 @@ class CoCa(nn.Module):
 		return loss
 
 	def forward(self, images, text):
-		# compute tokens
-		images_tokens = self.compute_image_tokens(images)
-		text_tokens = self.compute_text_tokens(text)
-
 		# compute embeddings for contrastive learning
-		image_embeddings = self.compute_image_embeddings(images_tokens)
-		text_embeddings = self.compute_text_embeddings(text_tokens)
+		image_embeddings = self.compute_image_embeddings(images)
+		text_embeddings = self.compute_text_embeddings(text)
 
 		# attentional pooling applied for contrastive learning and captioning
 		temp = self.attentional_pooling(image_embeddings)
