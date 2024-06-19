@@ -37,8 +37,11 @@ class CoCa(nn.Module):
 		contrastive_loss = contrastive_loss * self.contrastive_loss_weight
 
 
-	def captioning_loss(self, mml_output, text_tokens):
-		pass
+	def captioning_loss(self, mml_output, target):
+		mml_output = mml_output.view(-1, mml_output.size(-1))
+		target = target.view(-1)
+		loss = ce(mml_output, target)
+		return loss
 
 	def forward(self, images, text):
 		# compute tokens
