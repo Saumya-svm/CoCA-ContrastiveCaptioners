@@ -1,11 +1,14 @@
 import torch
-from torch import nn
+from torch import nn, einsum
+from torch.nn.functional import cross_entropy as ce
 
 class CoCa(nn.Module):
 	def __init__(self):
 		self.image_enc = nn.ModuleList([])
 		self.uni_text_dec = nn.ModuleList([])
 		self.mml_text_dec = nn.ModuleList([])
+
+		self.temperature = None
 
 	def compute_image_embeddings(self, images_tokens):
 		pass
@@ -20,7 +23,19 @@ class CoCa(nn.Module):
 		pass
 
 	def contrastive_loss(self, img_emb, txt_emb):
-		pass
+		# sim = torch.einsum('id,jd->i,j', img_emb, txt_emb) # mentioned the dimensions config to compute the dot product between each pair of vectors from two sets of vectors
+		# sim = sim/self.temperature
+
+
+		batch = img_emb.shape[0]
+		device = img_emb.device
+
+		sim = einsum('i d, j d -> i j', img_emb, txt_emb) # mentioned the dimensions config to compute the dot product between each pair of vectors from two sets of vectors
+		sim = sim * self.temperature.exp()
+		contrastive_labels = torch.arange(batch, device=device)
+		contrastive_loss = (ce(sim, contrastive_labels) + ce(sim.t(), contrastive_labels)) * 0.5
+		contrastive_loss = contrastive_loss * self.contrastive_loss_weight
+
 
 	def captioning_loss(self, mml_output, text_tokens):
 		pass
