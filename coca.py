@@ -2,10 +2,12 @@ import torch
 import torchvision
 from torch import nn, einsum
 from torch.nn.functional import cross_entropy as ce
+from utils import Tokenizer
 
 class CoCa(nn.Module):
 	def __init__(self, 
-			  image_enc, 
+			  image_enc,
+			  vocab,
 			  image_dim=1024,
 			  text_dim=1024):
 		super(CoCa, self).__init__()
@@ -16,6 +18,8 @@ class CoCa(nn.Module):
 
 		self.image_dim = image_dim
 		self.text_dim = text_dim
+
+		self.tokenizer = Tokenizer(vocab)
 
 		self.cls_token = nn.Parameter(torch.randn(self.text_dim))
 
@@ -28,10 +32,20 @@ class CoCa(nn.Module):
 			raise ValueError("Image Encoder has not been passed as an argument to the CoCa, pass an encoder of your choice to use the Coca model.")
 
 
-	def compute_text_embeddings(self, text_tokens):
-		# convert text into embeddings
+	def compute_text_embeddings(self, text):
+		# convert text into input embeddings
+		text_tokens = self.tokenizer(text)
 
 		# add cls token to the text
+		cls_token = self.cls_token.repeat(text_tokens.shape[0], 1)
+		text_tokens = torch.cat([cls_token, text_tokens], dim=1)
+
+		# pass tokens to the unimodal encoder
+		uni_output = self.uni_text_dec(text_tokens)
+		text_tokens, cls_token = uni_output[:, :-1], uni_output[:, -1]
+
+		return text_tokens, cls_token
+
 
 	def contrastive_loss(self, img_emb, txt_emb):
 		batch = img_emb.shape[0]
@@ -53,17 +67,16 @@ class CoCa(nn.Module):
 	def forward(self, images, text):
 		# compute embeddings for contrastive learning
 		image_embeddings = self.compute_image_embeddings(images)
-		text_embeddings = self.compute_text_embeddings(text)
+		text_tokens, text_embeddings = self.compute_text_embeddings(text)
 
 		# attentional pooling applied for contrastive learning and captioning
 		temp = self.attentional_pooling(image_embeddings)
 
-		uni_output = self.uni_text_dec(text_embeddings)
-		mml_output = self.mml_text_dec(uni_output)		
+		mml_output = self.mml_text_dec(text_tokens)		
 
 		# compute loss
 		con_loss = self.contrastive_loss(image_embeddings, text_embeddings)
-		cap_loss = self.captioning_loss(mml_output, text_tokens)
+		cap_loss = self.captioning_loss(mml_output, None)
 
 		loss = con_loss + cap_loss
 		return con_loss + cap_loss
