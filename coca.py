@@ -1,25 +1,28 @@
 import torch
+import torchvision
 from torch import nn, einsum
 from torch.nn.functional import cross_entropy as ce
 
 class CoCa(nn.Module):
-	def __init__(self):
-		self.image_enc = nn.ModuleList([])
+	def __init__(self, 
+			  image_enc, 
+			  image_dim=1024):
+		super(CoCa, self).__init__()
+
+		self.image_enc = None
 		self.uni_text_dec = nn.ModuleList([])
 		self.mml_text_dec = nn.ModuleList([])
 
 		self.temperature = None
 
-	def compute_image_embeddings(self, images_tokens):
-		pass
+	def compute_image_embeddings(self, images):
+		if self.image_enc is not None:
+			image_embeddings = self.image_enc(images)
+		else:
+			raise ValueError("Image Encoder has not been passed as an argument to the CoCa, pass an encoder of your choice to use the Coca model.")
+
 
 	def compute_text_embeddings(self, text_tokens):
-		pass
-
-	def compute_image_tokens(self, images):
-		pass
-
-	def compute_text_tokens(self, text):
 		pass
 
 	def contrastive_loss(self, img_emb, txt_emb):
