@@ -4,12 +4,19 @@ from torch import nn, einsum
 from torch.nn.functional import cross_entropy as ce
 from utils import Tokenizer
 
+class CrossAttention():
+	def __init__(self, dim, heads, context_dim) -> None:
+		pass
+
 class CoCa(nn.Module):
 	def __init__(self, 
 			  image_enc,
 			  vocab,
 			  image_dim=1024,
-			  text_dim=1024):
+			  text_dim=1024,
+			  num_patches=256,
+			  attn_dim=128,
+			  heads=8):
 		super(CoCa, self).__init__()
 
 		self.image_enc = None
@@ -24,6 +31,13 @@ class CoCa(nn.Module):
 		self.cls_token = nn.Parameter(torch.randn(self.text_dim))
 
 		self.temperature = None
+
+		self.img_queries = nn.Parameter(torch.randn(num_patches+1, image_dim))
+		self.attn_pooler = CrossAttention(dim=attn_dim, heads=heads)
+
+		# building the unimodal text decoder
+		# built with succesive decoder layers of vanilla transformers
+				
 
 	def compute_image_embeddings(self, images):
 		if self.image_enc is not None:
