@@ -4,6 +4,10 @@ from torch import nn, einsum
 from torch.nn.functional import cross_entropy as ce
 from utils import Tokenizer
 
+class SelfAttention:
+	def __init__(self) -> None:
+		pass
+
 class CrossAttention():
 	"""
 	Cross attention implementation for attentional pooling
@@ -34,8 +38,34 @@ class CrossAttention():
 
 		# current shape is b, h, n, d need to be merged to give output as b, n, h*d
 		out = out.transpose(1, 2).reshape(out.shape[0], -1, self.dim)
-	
+
 		return out
+	
+class TransformerDecoderLayer:
+	def __init__(self, dim):
+		"""
+		Transformer decoder layer
+		"""
+		self.dim = dim
+		self.mha = CrossAttention()
+		self.masked_mha = SelfAttention()
+		self.ffn = nn.Sequential(
+			nn.Linear(dim, dim),
+			nn.GeLU(),
+		)
+		self.norm = nn.LayerNorm(dim)
+
+	def forward(self, x):
+		x = self.norm(self.masked_mha(x) + x)
+		x = self.norm(self.mha(x) + x)
+		x = self.norm(self.ffn(x) + x)
+		return x
+
+
+class TransformerDecoder:
+	def __init__(self) -> None:
+		pass
+
 
 class CoCa(nn.Module):
 	def __init__(self, 
@@ -45,7 +75,7 @@ class CoCa(nn.Module):
 			  text_dim=1024,
 			  num_patches=256,
 			  attn_dim=128,
-			  heads=8):
+			  num_heads=8):
 		super(CoCa, self).__init__()
 
 		self.image_enc = None
@@ -63,10 +93,12 @@ class CoCa(nn.Module):
 		
 		# initialising tensors and module for attentional pooling
 		self.img_queries = nn.Parameter(torch.randn(num_patches+1, image_dim))
-		self.attn_pooler = CrossAttention(dim=attn_dim, heads=heads)
+		self.attn_pooler = CrossAttention(dim=attn_dim, num_heads=num_heads, context_dim=image_dim)
 
 		# building the unimodal text decoder
 		# built with succesive decoder layers of vanilla transformers
+		for i in range(unimodal_depth):
+			self.uni_text_dec.append(TransformerDecoder)
 				
 
 	def compute_image_embeddings(self, images):
