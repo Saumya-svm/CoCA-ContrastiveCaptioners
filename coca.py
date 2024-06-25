@@ -5,8 +5,37 @@ from torch.nn.functional import cross_entropy as ce
 from utils import Tokenizer
 
 class CrossAttention():
-	def __init__(self, dim, heads, context_dim) -> None:
-		pass
+	"""
+	Cross attention implementation for attentional pooling
+	"""
+	def __init__(self, dim, num_heads, context_dim) -> None:
+		self.dim = dim
+		self.num_heads = num_heads
+		self.context_dim = context_dim
+
+		self.queryLinear = nn.Linear(context_dim, dim)
+		self.keyLinear = nn.Linear(context_dim, dim)
+		self.valueLinear = nn.Linear(context_dim, dim)
+
+	def forward(self, queries, context):
+		# get query key value
+		q = self.queryLinear(queries)
+		k = self.keyLinear(context)
+		v = self.valueLinear(context)
+
+		# rearrange on the basis of heads
+		q, k, v = map(lambda t: t.reshape(t.shape[0], -1, self.num_heads, t.shape[-1] // self.num_heads).transpose(1, 2), (q, k, v))
+
+		# comptuing attention scores
+		attn = torch.matmul(q, k.transpose(-1, -2)) * self.scale
+		attn = attn.softmax(dim=-1)
+
+		out = torch.matmul(attn, v)
+
+		# current shape is b, h, n, d need to be merged to give output as b, n, h*d
+		out = out.transpose(1, 2).reshape(out.shape[0], -1, self.dim)
+	
+		return out
 
 class CoCa(nn.Module):
 	def __init__(self, 
@@ -31,7 +60,8 @@ class CoCa(nn.Module):
 		self.cls_token = nn.Parameter(torch.randn(self.text_dim))
 
 		self.temperature = None
-
+		
+		# initialising tensors and module for attentional pooling
 		self.img_queries = nn.Parameter(torch.randn(num_patches+1, image_dim))
 		self.attn_pooler = CrossAttention(dim=attn_dim, heads=heads)
 
@@ -44,6 +74,10 @@ class CoCa(nn.Module):
 			image_embeddings = self.image_enc(images)
 		else:
 			raise ValueError("Image Encoder has not been passed as an argument to the CoCa, pass an encoder of your choice to use the Coca model.")
+		
+		img_queries = self.img_queries.repeat(images.shape[0], 1, 1)
+		img_queries = self.attn_pooler(img_queries, image_embeddings)
+		return img_queries
 
 
 	def compute_text_embeddings(self, text):
