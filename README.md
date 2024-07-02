@@ -19,4 +19,6 @@ The aim is to train self supervised representation learning model from scratch t
 - The type of contrastive loss used in the code is InfoNCE (Information Noise Contrastive Estimation). 
 
 
-InfoNCE Loss = -log \frac{\exp(sim(q, k^+)/\tau)}{\sum_{i=0}^K \exp(sim(q, k_i)/\tau)}
+$$
+\text{InfoNCE Loss} = -\log \frac{\exp(sim(q, k^+)/\tau)}{\sum_{i=0}^K \exp(sim(q, k_i)/\tau)}
+$$
