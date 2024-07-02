@@ -5,7 +5,7 @@ from argparse import ArgumentParser
 
 def main(args):
 	image_enc = ViTModel.from_pretrained("google/vit-base-patch16-224")
-	model = CoCa(image_enc=image_enc, vocab=['a', 'the', 'an'])
+	model = CoCa(image_enc=image_enc, vocab=['a', 'the', 'an'], text_dim=args.emb_dim)
 	
 	# print(model)
 	text = torch.randint(0, args.vocab_size, (args.batch_size, args.emb_dim))

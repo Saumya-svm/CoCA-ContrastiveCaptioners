@@ -17,15 +17,16 @@ class EmbedsToLatents(nn.Module):
 		return out
 
 class SelfAttention(nn.Module):
-	def __init__(self) -> None:
+	def __init__(self, dim=128) -> None:
 		super(SelfAttention, self).__init__()
 		self.num_heads = 8
-		self.head_dim = 64
+		self.head_dim = dim//self.num_heads
 		self.scale = self.head_dim ** -0.5
+		self.dim = dim
 
-		self.query = nn.Linear(self.head_dim, self.head_dim * self.num_heads)
-		self.key = nn.Linear(self.head_dim, self.head_dim * self.num_heads)
-		self.value = nn.Linear(self.head_dim, self.head_dim * self.num_heads)
+		self.query = nn.Linear(self.dim, self.head_dim * self.num_heads)
+		self.key = nn.Linear(self.dim, self.head_dim * self.num_heads)
+		self.value = nn.Linear(self.dim, self.head_dim * self.num_heads)
 
 	def forward(self, x):
 		batch_size, seq_length, _ = x.size()
@@ -60,25 +61,32 @@ class CrossAttention(nn.Module):
 	Cross attention implementation for attentional pooling
 	"""
 	def __init__(self, 
-			dim, 
-			num_heads, 
-			context_dim) -> None:
+			dim=128, 
+			num_heads=8,
+			context_dim=None,
+			self_dim=512,
+			out_dim=512) -> None:
 		super(CrossAttention, self).__init__()
 		
 		self.dim = dim
 		self.num_heads = num_heads
-		self.context_dim = context_dim
+		self.context_dim = context_dim if context_dim is not None else dim
 		
 		self.scale = dim ** -0.5
 
-		self.queryLinear = nn.Linear(context_dim, dim)
+		self.queryLinear = nn.Linear(self_dim, dim)
 		self.keyLinear = nn.Linear(context_dim, dim)
 		self.valueLinear = nn.Linear(context_dim, dim)
+
+		self.out_proj = nn.Linear(dim, out_dim)
+		
 
 	def forward(self, queries, context):
 		# get query key value
 		q = self.queryLinear(queries)
+		print(q.shape)
 		k = self.keyLinear(context)
+		print(k.shape)
 		v = self.valueLinear(context)
 
 		# rearrange on the basis of heads
@@ -93,11 +101,12 @@ class CrossAttention(nn.Module):
 
 		# current shape is b, h, n, d need to be merged to give output as b, n, h*d
 		out = out.transpose(1, 2).reshape(out.shape[0], -1, self.dim)
-
+		out = self.out_proj(out)
+		print(out.shape)
 		return out
 	
 class TransformerDecoderLayer(nn.Module):
-	def __init__(self, dim, cross_attn=False):
+	def __init__(self, dim, cross_attn=False, context_dim=None):
 		"""
 		Transformer decoder layer
 		"""
@@ -106,9 +115,9 @@ class TransformerDecoderLayer(nn.Module):
 		self.dim = dim
 		self.mha = None
 		if cross_attn:
-			self.mha = CrossAttention(1, 2, 3)
+			self.mha = CrossAttention(dim=128, num_heads=8, context_dim=context_dim, self_dim=dim, out_dim=dim)
 		
-		self.masked_mha = SelfAttention()
+		self.masked_mha = SelfAttention(dim=dim)
 		self.ffn = nn.Sequential(
 			nn.Linear(dim, dim),
 			nn.GELU(),
@@ -131,8 +140,9 @@ class TransformerDecoderLayer(nn.Module):
 		pe = pe.unsqueeze(0)
 
 		seq = seq + pe
+		return seq
 
-	def forward(self, x):
+	def forward(self, x, y=None):
 		# apply positional encodings to the input
 		x = self.pos_enc(x)
 
@@ -140,7 +150,7 @@ class TransformerDecoderLayer(nn.Module):
 
 		# compute the below if cross attention is included
 		if self.mha is not None:
-			x = self.norm(self.mha(x) + x)
+			x = self.norm(self.mha(x, y) + x)
 
 		x = self.norm(self.ffn(x) + x)
 		return x
@@ -150,31 +160,35 @@ class CoCa(nn.Module):
 	def __init__(self, 
 			  image_enc,
 			  vocab,
-			  image_dim=1024,
-			  text_dim=1024,
-			  num_patches=256,
+			  image_dim=768,
+			  text_dim=512,
+			  num_patches=196,
 			  attn_dim=128,
 			  num_heads=8,
 			  unimodal_depth=3,
-			  multimodal_depth=3):
+			  multimodal_depth=3,
+			  vocab_size=10000):
 		super(CoCa, self).__init__()
 
-		self.image_enc = None
+		self.image_enc = image_enc
 		self.uni_text_dec = nn.ModuleList([])
 		self.mml_text_dec = nn.ModuleList([])
 
 		self.image_dim = image_dim
 		self.text_dim = text_dim
 
+		self.vocab_size = vocab_size
+
 		self.tokenizer = Tokenizer(vocab)
+		self.token2emb = nn.Embedding(vocab_size, self.text_dim)
 
 		self.cls_token = nn.Parameter(torch.randn(self.text_dim))
 
-		self.temperature = None
+		self.temperature = nn.Parameter(torch.Tensor([1.]))
 		
 		# initialising tensors and module for attentional pooling
 		self.img_queries = nn.Parameter(torch.randn(num_patches+1, image_dim))
-		self.attn_pooler = CrossAttention(dim=attn_dim, num_heads=num_heads, context_dim=image_dim)
+		self.attn_pooler = CrossAttention(dim=attn_dim, num_heads=num_heads, context_dim=image_dim, self_dim=image_dim, out_dim=attn_dim)
 
 		# building the unimodal text decoder
 		# built with succesive decoder layers of vanilla transformers
@@ -182,33 +196,49 @@ class CoCa(nn.Module):
 			self.uni_text_dec.append(TransformerDecoderLayer(dim=text_dim))
 
 		for i in range(multimodal_depth):	
-			self.mml_text_dec.append(TransformerDecoderLayer(dim=text_dim, cross_attn=True))
+			self.mml_text_dec.append(TransformerDecoderLayer(dim=text_dim, cross_attn=True, context_dim=attn_dim))
 
-		self.image_to_latent = EmbedsToLatents(embed_dim=image_dim, latent_dim=image_dim)
+		self.image_to_latent = EmbedsToLatents(embed_dim=128, latent_dim=text_dim)
 		self.text_to_latent = EmbedsToLatents(embed_dim=text_dim, latent_dim=text_dim)
+
+		self.contrastive_loss_weight = 1
+
+		self.to_logits = nn.Linear(text_dim, vocab_size)
 
 	def compute_image_embeddings(self, images):
 		if self.image_enc is not None:
 			image_embeddings = self.image_enc(images)
+			print(image_embeddings['last_hidden_state'].shape)
 		else:
 			raise ValueError("Image Encoder has not been passed as an argument to the CoCa, pass an encoder of your choice to use the Coca model.")
 		
-		img_queries = self.img_queries.repeat(images.shape[0], 1, 1)
-		img_queries = self.attn_pooler(img_queries, image_embeddings)
-		return img_queries[:, :-1], img_queries[:, -1]
+		if self.attn_pooler is not None:
+			img_queries = self.img_queries.repeat(images.shape[0], 1, 1)
+			print(img_queries.shape)
+			img_queries = self.attn_pooler(img_queries, image_embeddings['last_hidden_state'])
+		
+		print(img_queries.shape)
+		return img_queries[:, :-1], img_queries[:, -1:]
 
 
 	def compute_text_embeddings(self, text):
+		# input will be batch_size, seq_len with each element in the sequence spanning sequence length being the token for the word. need to convert the token into embeddings
+
 		# convert text into input embeddings
-		text_tokens = self.tokenizer(text)
+		# text_tokens = self.tokenizer.tokenize(text)
+		text_tokens = self.token2emb(text)
+		print(f"text tokens {text_tokens.shape}")
 
 		# add cls token to the text
-		cls_token = self.cls_token.repeat(text_tokens.shape[0], 1)
+		cls_token = self.cls_token.repeat(text_tokens.shape[0], 1).unsqueeze(1)
 		text_tokens = torch.cat([cls_token, text_tokens], dim=1)
 
 		# pass tokens to the unimodal encoder
-		uni_output = self.uni_text_dec(text_tokens)
-		text_tokens, cls_token = uni_output[:, :-1], uni_output[:, -1:]
+		for layer in self.uni_text_dec:
+			text_tokens = layer(text_tokens)
+
+		text_tokens, cls_token = text_tokens[:, :-1], text_tokens[:, -1:]
+		print(cls_token.shape, text_tokens.shape)
 
 		return text_tokens, cls_token
 
@@ -222,6 +252,7 @@ class CoCa(nn.Module):
 		contrastive_labels = torch.arange(batch, device=device)
 		contrastive_loss = (ce(sim, contrastive_labels) + ce(sim.t(), contrastive_labels)) * 0.5
 		contrastive_loss = contrastive_loss * self.contrastive_loss_weight
+		return contrastive_loss
 
 
 	def captioning_loss(self, mml_output, target):
@@ -230,20 +261,33 @@ class CoCa(nn.Module):
 		loss = ce(mml_output, target)
 		return loss
 
-	def forward(self, images, text):
+	def forward(
+		self, 
+		images, 
+		text
+	):
+		
 		# compute embeddings for contrastive learning
 		image_tokens, image_embeddings = self.compute_image_embeddings(images)
 		text_tokens, text_embeddings = self.compute_text_embeddings(text)
 
-		text_tokens = self.mml_text_dec(text_tokens, image_tokens)		
+		for layer in self.mml_text_dec[:1]:
+			print("tokens")
+			print(image_tokens.shape, text_tokens.shape)
+			text_tokens = layer(text_tokens, image_tokens)
+
+		# text_tokens = self.mml_text_dec(text_tokens, image_tokens)
+		logits = self.to_logits(text_tokens)		
 
 		# covnert the image embeddings and text embeddings into latent representations as contrastive loss is computed in the latent space
 		image_latents = self.image_to_latent(image_embeddings)
 		text_latents = self.text_to_latent(text_embeddings)
 
-		# compute loss
-		con_loss = self.contrastive_loss(image_latents, text_latents)
-		cap_loss = self.captioning_loss(text_tokens, None)
+		# compute loss 
+		con_loss = self.contrastive_loss(image_latents.squeeze(1), text_latents.squeeze(1))
+		print(con_loss)
+		
+		cap_loss = self.captioning_loss(logits, torch.randint(0, self.vocab_size, (text_tokens.shape[0], text_tokens.shape[1])))
 
 		loss = con_loss + cap_loss
 		return con_loss + cap_loss
