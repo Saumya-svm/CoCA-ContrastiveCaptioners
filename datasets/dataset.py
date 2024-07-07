@@ -11,13 +11,21 @@ def img2array(file):
     return arr
 
 class flickr(Dataset):
-    def __init__(self) -> None:
+    def __init__(self,  type='train') -> None:
         super(flickr, self).__init__()
 
         df = pd.read_csv("final.csv")
         unique_objects = df['image'].unique()
-        self.imgs = unique_objects
-        self.captions = df['caption']
+        idx = df.shape[0]*0.75
+
+        if type == 'train':
+            self.imgs = unique_objects[:idx]
+            self.captions = df['caption'][:idx]
+        else:
+            self.imgs = unique_objects[idx:]
+            self.captions = df['caption'][idx:]
+
+        
 
     def __getitem__(self, index) -> Tuple[np.ndarray, str]:
         img = img2array(self.imgs[index//5])
